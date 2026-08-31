@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, CheckCheck, Heart, Reply, SmilePlus, Flame, MapPin } from "lucide-react";
 import { Map, Marker } from "pigeon-maps";
 import type { Message } from "@/types/database";
@@ -45,6 +45,57 @@ export const MessageBubble = React.memo(function MessageBubble({
   const [showReactionsMenu, setShowReactionsMenu] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [locationCoords, setLocationCoords] = useState<[number, number] | null>(null);
+
+  // Swipe-to-reply state
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const [isSwiping, setIsSwiping] = useState(false);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+  const swipeTriggered = useRef(false);
+  const SWIPE_THRESHOLD = 60;
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+    swipeTriggered.current = false;
+    setIsSwiping(false);
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    const deltaX = e.touches[0].clientX - touchStartX.current;
+    const deltaY = e.touches[0].clientY - touchStartY.current;
+
+    // If vertical scroll is dominant, don't hijack
+    if (Math.abs(deltaY) > Math.abs(deltaX) && !isSwiping) return;
+
+    // For own messages, swipe left (negative). For partner messages, swipe right (positive).
+    const validSwipe = isOwn ? deltaX < 0 : deltaX > 0;
+    if (!validSwipe) {
+      setSwipeOffset(0);
+      return;
+    }
+
+    setIsSwiping(true);
+    const absDelta = Math.abs(deltaX);
+    // Cap the visual offset at 80px
+    const capped = Math.min(absDelta, 80);
+    setSwipeOffset(isOwn ? -capped : capped);
+
+    if (absDelta >= SWIPE_THRESHOLD && !swipeTriggered.current) {
+      swipeTriggered.current = true;
+      // Haptic feedback if available
+      if (navigator.vibrate) navigator.vibrate(30);
+    }
+  }, [isOwn, isSwiping]);
+
+  const handleTouchEnd = useCallback(() => {
+    if (swipeTriggered.current && onReply) {
+      onReply(message);
+    }
+    setSwipeOffset(0);
+    setIsSwiping(false);
+    swipeTriggered.current = false;
+  }, [onReply, message]);
 
   const AVAILABLE_REACTIONS = ["❤️", "😂", "😮", "😢", "👍", "👎"];
 
@@ -152,8 +203,18 @@ export const MessageBubble = React.memo(function MessageBubble({
   // Get unique emojis used
   const reactionEmojis = hasReactions ? Array.from(new Set(Object.values(message.reactions!))) : [];
 
+  const showSwipeHint = Math.abs(swipeOffset) >= SWIPE_THRESHOLD;
+
   return (
     <div className={`group relative flex w-full animate-message-in ${isOwn ? "justify-end" : "justify-start"}`}>
+      {/* Swipe-to-reply indicator */}
+      {isSwiping && (
+        <div className={`absolute top-1/2 -translate-y-1/2 transition-opacity ${showSwipeHint ? "opacity-100" : "opacity-40"} ${
+          isOwn ? "right-[calc(78%+8px)] sm:right-[calc(65%+8px)]" : "left-[calc(78%+8px)] sm:left-[calc(65%+8px)]"
+        }`}>
+          <Reply className={`h-5 w-5 text-primary ${showSwipeHint ? "scale-125" : ""} transition-transform`} />
+        </div>
+      )}
       {/* Hover Actions Menu */}
       <div className={`absolute top-0 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 ${
         isOwn ? "right-[100%] mr-2" : "left-[100%] ml-2"
@@ -192,7 +253,16 @@ export const MessageBubble = React.memo(function MessageBubble({
         )}
       </div>
 
-      <div className="flex max-w-[78%] flex-col sm:max-w-[65%]">
+      <div
+        className="flex max-w-[78%] flex-col sm:max-w-[65%]"
+        style={{
+          transform: `translateX(${swipeOffset}px)`,
+          transition: isSwiping ? 'none' : 'transform 0.2s ease-out',
+        }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
         {/* Quoted Reply */}
         {repliedMessage && (
           <div className={`mb-1 overflow-hidden rounded-xl border-l-4 border-primary/50 bg-black/5 px-3 py-1.5 opacity-80 ${
