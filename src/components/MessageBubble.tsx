@@ -144,12 +144,9 @@ export const MessageBubble = React.memo(function MessageBubble({
         try { await cachePhoto(path, blob); } catch {}
         if (!cancelled) setPhotoUrl(URL.createObjectURL(blob));
 
-        if (!isOwn) {
-          deleteStoragePhoto(path).catch(() => {});
-          if (getAutoSavePreference()) {
-            const extension = path.split(".").pop() ?? "jpg";
-            downloadPhotoToDevice(blob, `chat-photo-${Date.now()}.${extension}`);
-          }
+        if (!isOwn && getAutoSavePreference()) {
+          const extension = path.split(".").pop() ?? "jpg";
+          downloadPhotoToDevice(blob, `chat-photo-${Date.now()}.${extension}`);
         }
       } else if (message.message_type === "audio") {
         try {
@@ -159,9 +156,6 @@ export const MessageBubble = React.memo(function MessageBubble({
             const url = URL.createObjectURL(blob);
             if (cancelled) return;
             setAudioUrl(url);
-            if (!isOwn) {
-              deleteStorageAudio(path).catch(() => {});
-            }
           }
         } catch (err) {
           console.error("Failed to load audio", err);
